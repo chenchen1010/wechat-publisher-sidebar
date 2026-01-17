@@ -15,6 +15,7 @@ export interface PublishRequestBody {
     digest?: string;
     author?: string;
     contentSourceUrl?: string;
+    coverImage?: string; // 可选的独立封面图片（base64 或 data URL）
   };
 }
 

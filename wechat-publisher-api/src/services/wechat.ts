@@ -48,7 +48,16 @@ export const getAccountBasicInfo = async (accessToken: string) => {
 
 export const uploadImage = async (accessToken: string, buffer: Buffer, filename: string) => {
   const form = new FormData();
-  form.append('media', buffer, { filename });
+  const ext = filename.split('.').pop()?.toLowerCase() || 'jpg';
+  const mimeTypes: Record<string, string> = {
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    png: 'image/png',
+    gif: 'image/gif',
+    bmp: 'image/bmp'
+  };
+  const contentType = mimeTypes[ext] || 'image/jpeg';
+  form.append('media', buffer, { filename, contentType });
 
   const response = await axios.post(
     `${WECHAT_BASE_URL}/material/add_material`,
