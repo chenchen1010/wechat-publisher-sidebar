@@ -1,0 +1,5 @@
+
+> wechat-publisher-api@0.1.0 dev
+> tsx src/index.ts
+
+{"level":30,"time":1768614487810,"pid":13983,"hostname":"chenzhongqideMacBook-Air.local","msg":"Server listening at http://0.0.0.0:3000"}

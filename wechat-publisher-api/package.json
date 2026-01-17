@@ -1,0 +1,22 @@
+{
+  "name": "wechat-publisher-api",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@fastify/cors": "^8.5.0",
+    "axios": "^1.7.2",
+    "cheerio": "^1.0.0-rc.12",
+    "fastify": "^4.28.1",
+    "form-data": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.9",
+    "tsx": "^4.19.2",
+    "typescript": "^5.9.3"
+  }
+}

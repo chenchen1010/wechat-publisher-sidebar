@@ -1,0 +1,249 @@
+:root {
+  --nav-height: 48px;
+  --footer-height: 72px;
+  --mobile-preview-width: 390px;
+  --bg-color-workspace: var(--semi-color-fill-0);
+  --color-wechat-green: #07c160;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  background-color: var(--semi-color-bg-0);
+}
+
+.app-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+// TopNav
+.top-nav {
+  padding: 12px;
+  border-bottom: 1px solid var(--semi-color-border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  height: var(--nav-height);
+  box-sizing: border-box;
+  background-color: var(--semi-color-bg-0);
+}
+
+// ConfigPanel
+.config-panel {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  background-color: var(--semi-color-bg-0);
+  border-bottom: 1px solid var(--semi-color-border);
+  flex-shrink: 0;
+}
+
+.field-mapping-card,
+.style-config-card {
+  border: 1px solid var(--semi-color-border);
+  border-radius: var(--semi-border-radius-medium);
+  padding: 12px;
+  background-color: var(--semi-color-bg-1);
+
+  .card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    font-weight: 600;
+  }
+}
+
+.theme-selector {
+  display: flex;
+  gap: 8px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding-bottom: 8px;
+  -webkit-overflow-scrolling: touch;
+
+  &::-webkit-scrollbar {
+    height: 4px;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: var(--semi-color-text-3);
+    border-radius: 2px;
+  }
+
+  .semi-tag {
+    flex: 0 0 auto;
+  }
+}
+
+// Workspace
+.workspace {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background-color: var(--bg-color-workspace);
+  min-height: 0;
+
+  .toolbar {
+    padding: 8px 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background-color: var(--semi-color-bg-0);
+    border-bottom: 1px solid var(--semi-color-border);
+    gap: 12px;
+    flex-wrap: wrap;
+
+    .toolbar-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+
+      .split-toggle {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        margin-left: 8px;
+        padding-left: 8px;
+        border-left: 1px solid var(--semi-color-border);
+      }
+    }
+
+    .toolbar-right {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+  }
+
+  .content-area {
+    flex: 1;
+    overflow: hidden;
+    padding: 8px;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    gap: 8px;
+    min-height: 0;
+
+    .editor-container {
+      width: 100%;
+      height: 100%;
+      min-height: 0;
+
+      textarea {
+        width: 100%;
+        height: 100%;
+        border: 1px solid var(--semi-color-border);
+        border-radius: 6px;
+        outline: none;
+        resize: none;
+        font-family: 'SF Mono', Consolas, Monaco, monospace;
+        font-size: 14px;
+        line-height: 1.6;
+        padding: 12px;
+        background: var(--semi-color-bg-0);
+        overflow: auto;
+        box-sizing: border-box;
+
+        &:focus {
+          border-color: var(--semi-color-primary);
+        }
+      }
+    }
+
+    .preview-container {
+      width: 100%;
+      background: white;
+      box-shadow: var(--semi-shadow-elevated);
+      height: 100%;
+      padding: 20px;
+      box-sizing: border-box;
+      overflow-y: auto;
+      border-radius: 6px;
+
+      // Basic reset for preview content to match WeChat
+      img {
+        max-width: 100%;
+      }
+
+      .hljs {
+        background: transparent;
+      }
+    }
+
+    // 双栏模式
+    &.split-mode {
+      .editor-container {
+        flex: 1;
+        min-width: 0;
+      }
+
+      .preview-container {
+        flex: 1;
+        min-width: 0;
+        width: auto;
+      }
+    }
+  }
+}
+
+// Footer
+.footer {
+  padding: 16px;
+  background: var(--semi-color-bg-0);
+  border-top: 1px solid var(--semi-color-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  height: var(--footer-height);
+  box-sizing: border-box;
+}
+
+.footer-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.batch-progress-list,
+.batch-failed-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.batch-progress-item {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--semi-color-text-2);
+}
+
+.batch-progress-item.status-success {
+  color: var(--semi-color-success);
+}
+
+.batch-progress-item.status-failed {
+  color: var(--semi-color-danger);
+}
+
+// Utils
+.text-tertiary {
+  color: var(--semi-color-text-2);
+}
