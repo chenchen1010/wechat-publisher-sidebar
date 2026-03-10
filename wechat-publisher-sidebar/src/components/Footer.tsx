@@ -1,12 +1,48 @@
 import React, { useMemo, useState } from 'react';
 import { Button, Toast } from '@douyinfe/semi-ui';
 import PublishConfirmModal from './PublishConfirmModal';
+import ManualCopyModal from './ManualCopyModal';
 import { useAppStore } from '../store/useAppStore';
-import { buildWeChatHtml } from '../utils/markdown';
+import { buildWeChatHtmlAsync, buildWeChatHtmlForPublish } from '../utils/markdown';
 import { copyHtmlToClipboard } from '../utils/clipboard';
 import { publishArticle } from '../services/api';
-import { getCellString, selectRecordIdList, setRecords } from '../services/bitable';
+import { getCellString, selectRecordIdList, setRecords, getAttachmentUrls, isBitableAvailable } from '../services/bitable';
+import { PublishStatus } from '../services/syncService';
 import BatchPublishModal from './BatchPublishModal';
+import { resolveAccountByValue } from '../services/accountService';
+
+const DEBUG_PUBLISH = import.meta.env.VITE_DEBUG_PUBLISH === '1';
+
+const logPublishDebug = (label: string, info: Record<string, unknown>) => {
+    if (!DEBUG_PUBLISH) {
+        return;
+    }
+    console.info(`[publish-debug] ${label}`, info);
+};
+
+const countImagesInHtml = (html: string) => {
+    try {
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+        return doc.querySelectorAll('img').length;
+    } catch {
+        return 0;
+    }
+};
+
+// 从 URL 获取图片的 base64
+const fetchImageAsBase64 = async (url: string): Promise<string> => {
+    const response = await fetch(url);
+    const blob = await response.blob();
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+            const result = reader.result as string;
+            resolve(result);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+    });
+};
 
 const Footer: React.FC = () => {
     const [isPublishModalOpen, setIsPublishModalOpen] = useState(false);
@@ -16,7 +52,9 @@ const Footer: React.FC = () => {
     const [batchStage, setBatchStage] = useState<'confirm' | 'running' | 'done'>('confirm');
     const [batchItems, setBatchItems] = useState<Array<{ recordId: string; title: string; status: 'pending' | 'running' | 'success' | 'failed'; message?: string }>>([]);
     const [isBatchRunning, setIsBatchRunning] = useState(false);
-    const { apiConfig, setApiModalOpen, currentRecord, fieldMapping, markdownContent, themeId, baseInfo, records, updateRecordFields } = useAppStore();
+    const [manualCopyHtml, setManualCopyHtml] = useState('');
+    const [isManualCopyModalOpen, setIsManualCopyModalOpen] = useState(false);
+    const { currentRecord, fieldMapping, markdownContent, themeId, baseInfo, records, updateRecordFields, accountList } = useAppStore();
 
     const recordMap = useMemo(() => {
         const map = new Map<string, typeof records[number]>();
@@ -73,7 +111,27 @@ const Footer: React.FC = () => {
         return rawTitle.length > 64 ? rawTitle.slice(0, 64) : rawTitle;
     };
 
-    const writeBackResult = async (recordId: string, status: string, publishId?: string) => {
+    const resolvePublishAccount = (record: typeof records[number] | null) => {
+        if (!fieldMapping.accountFieldId) {
+            return { ok: false, error: '请先在字段映射中选择发布账号字段' } as const;
+        }
+        if (!record) {
+            return { ok: false, error: '当前没有选中记录' } as const;
+        }
+        if (!accountList.length) {
+            return { ok: false, error: '未找到账号设置表，请先创建账号设置表并填写 AppID/AppSecret' } as const;
+        }
+        const accountResult = resolveAccountByValue(accountList, record.fields[fieldMapping.accountFieldId]);
+        if (!accountResult.account) {
+            if (!accountResult.key) {
+                return { ok: false, error: '请在发布账号字段填写要发布的账号' } as const;
+            }
+            return { ok: false, error: `发布账号“${accountResult.key}”未在账号设置表找到` } as const;
+        }
+        return { ok: true, account: accountResult.account } as const;
+    };
+
+    const writeBackResult = async (recordId: string, status: string, draftId?: string, errorMsg?: string) => {
         if (!baseInfo.tableId) {
             return { success: false, message: '未连接表格' };
         }
@@ -81,11 +139,14 @@ const Footer: React.FC = () => {
         if (fieldMapping.statusFieldId) {
             fields[fieldMapping.statusFieldId] = status;
         }
-        if (fieldMapping.publishIdFieldId && publishId) {
-            fields[fieldMapping.publishIdFieldId] = publishId;
+        if (fieldMapping.draftIdFieldId && draftId) {
+            fields[fieldMapping.draftIdFieldId] = draftId;
         }
-        if (fieldMapping.publishTimeFieldId && status !== '发布失败') {
-            fields[fieldMapping.publishTimeFieldId] = Date.now();
+        if (fieldMapping.syncTimeFieldId && status !== PublishStatus.FAILED) {
+            fields[fieldMapping.syncTimeFieldId] = Date.now();
+        }
+        if (fieldMapping.errorFieldId) {
+            fields[fieldMapping.errorFieldId] = errorMsg || '';
         }
         if (Object.keys(fields).length === 0) {
             return { success: true };
@@ -107,10 +168,57 @@ const Footer: React.FC = () => {
         if (!fieldMapping.contentFieldId) {
             throw new Error('请先配置正文字段');
         }
+
+        // 从 recordMap 获取记录字段
+        const record = recordMap.get(recordId);
+
+        // 获取标题：优先从 titleFieldId 获取，否则从 markdown 提取
+        let title = '';
+        if (fieldMapping.titleFieldId && record?.fields[fieldMapping.titleFieldId]) {
+            title = toText(record.fields[fieldMapping.titleFieldId]);
+        }
+        if (!title) {
+            // 回退：从 markdown 内容提取标题
+            const content = await getCellString(baseInfo.tableId, fieldMapping.contentFieldId, recordId);
+            title = extractTitleFromMarkdown(content);
+        }
+        title = title.length > 64 ? title.slice(0, 64) : title;
+
+        // 获取正文
         const content = await getCellString(baseInfo.tableId, fieldMapping.contentFieldId, recordId);
-        const rawTitle = extractTitleFromMarkdown(content);
-        const title = rawTitle.length > 64 ? rawTitle.slice(0, 64) : rawTitle;
-        return { title, content };
+
+        // 获取其他字段
+        let author: string | undefined;
+        let digest: string | undefined;
+        let contentSourceUrl: string | undefined;
+        let coverImage: string | undefined;
+
+        if (record) {
+            const fields = record.fields;
+            if (fieldMapping.authorFieldId && fields[fieldMapping.authorFieldId]) {
+                author = toText(fields[fieldMapping.authorFieldId]) || undefined;
+            }
+            if (fieldMapping.digestFieldId && fields[fieldMapping.digestFieldId]) {
+                digest = toText(fields[fieldMapping.digestFieldId]) || undefined;
+            }
+            if (fieldMapping.sourceUrlFieldId && fields[fieldMapping.sourceUrlFieldId]) {
+                contentSourceUrl = toText(fields[fieldMapping.sourceUrlFieldId]) || undefined;
+            }
+        }
+
+        // 获取封面图片
+        if (fieldMapping.coverFieldId && isBitableAvailable()) {
+            try {
+                const attachments = await getAttachmentUrls(baseInfo.tableId, fieldMapping.coverFieldId, recordId);
+                if (attachments.length > 0) {
+                    coverImage = await fetchImageAsBase64(attachments[0].url);
+                }
+            } catch (e) {
+                console.warn('获取封面图片失败:', e);
+            }
+        }
+
+        return { title, content, author, digest, contentSourceUrl, coverImage };
     };
 
     const handleCopy = async () => {
@@ -119,8 +227,17 @@ const Footer: React.FC = () => {
             return;
         }
         try {
-            const html = buildWeChatHtml(markdownContent, themeId);
+            // 使用异步版本处理 img:// 协议
+            const html = await buildWeChatHtmlAsync(markdownContent, themeId);
             const result = await copyHtmlToClipboard(html, themeId);
+
+            if (result.needManualCopy) {
+                // 自动复制失败，打开手动复制弹窗
+                setManualCopyHtml(result.html);
+                setIsManualCopyModalOpen(true);
+                return;
+            }
+
             if (result.imageTotal > 0 && result.failCount > 0) {
                 Toast.warning(`已复制，${result.failCount} 张图片未能处理，可能需要手动检查`);
                 return;
@@ -133,26 +250,24 @@ const Footer: React.FC = () => {
     };
 
     const handlePublishClick = () => {
-        if (!apiConfig.hasConfigured) {
-            Toast.warning('请先配置公众号 AppID 和 AppSecret');
-            setApiModalOpen(true);
-            return;
-        }
         if (!fieldMapping.contentFieldId) {
             Toast.warning('请先在字段映射中选择正文字段');
+            return;
+        }
+        if (!fieldMapping.accountFieldId) {
+            Toast.warning('请先在字段映射中选择发布账号字段');
             return;
         }
         setIsPublishModalOpen(true);
     };
 
     const handleBatchClick = async () => {
-        if (!apiConfig.hasConfigured) {
-            Toast.warning('请先配置公众号 AppID 和 AppSecret');
-            setApiModalOpen(true);
-            return;
-        }
         if (!fieldMapping.contentFieldId) {
             Toast.warning('请先在字段映射中选择正文字段');
+            return;
+        }
+        if (!fieldMapping.accountFieldId) {
+            Toast.warning('请先在字段映射中选择发布账号字段');
             return;
         }
         if (!baseInfo.tableId || !baseInfo.viewId) {
@@ -192,6 +307,11 @@ const Footer: React.FC = () => {
             nextItems[index] = { ...item, status: 'running' };
             setBatchItems([...nextItems]);
             try {
+                const record = recordMap.get(item.recordId) || null;
+                const accountResult = resolvePublishAccount(record);
+                if (!accountResult.ok) {
+                    throw new Error(accountResult.error);
+                }
                 const article = await loadArticleFromRecord(item.recordId);
                 if (!article.title.trim()) {
                     throw new Error('标题为空');
@@ -199,14 +319,33 @@ const Footer: React.FC = () => {
                 if (!article.content.trim()) {
                     throw new Error('正文为空');
                 }
-                const html = buildWeChatHtml(article.content, themeId);
+                const { html, missingImageIds } = await buildWeChatHtmlForPublish(article.content, themeId);
+                logPublishDebug('batch-prepared', {
+                    recordId: item.recordId,
+                    titleLength: article.title.length,
+                    markdownLength: article.content.length,
+                    htmlLength: html.length,
+                    imageCount: countImagesInHtml(html),
+                    missingImageCount: missingImageIds.length,
+                    hasAuthor: Boolean(article.author),
+                    hasDigest: Boolean(article.digest),
+                    hasSourceUrl: Boolean(article.contentSourceUrl),
+                    hasCoverImage: Boolean(article.coverImage)
+                });
+                if (missingImageIds.length > 0) {
+                    throw new Error(`有 ${missingImageIds.length} 张图片找不到（图片只保存在本机），请重新插入图片后再发布`);
+                }
                 const result = await publishArticle({
-                    appId: apiConfig.appId,
-                    appSecret: apiConfig.appSecret,
+                    appId: accountResult.account.appId,
+                    appSecret: accountResult.account.appSecret,
                     publishMode: batchMode,
                     article: {
                         title: article.title,
                         content: html,
+                        author: article.author,
+                        digest: article.digest,
+                        contentSourceUrl: article.contentSourceUrl,
+                        coverImage: article.coverImage
                     }
                 });
                 const publishId = result.mode === 'publish' ? result.publishId : result.draftMediaId;
@@ -219,6 +358,11 @@ const Footer: React.FC = () => {
                 successCount += 1;
             } catch (error) {
                 const message = error instanceof Error ? error.message : '发布失败';
+                logPublishDebug('batch-error', {
+                    recordId: item.recordId,
+                    message,
+                    details: (error as { details?: unknown }).details
+                });
                 await writeBackResult(item.recordId, '发布失败');
                 nextItems[index] = { ...item, status: 'failed', message };
                 failedCount += 1;
@@ -234,7 +378,7 @@ const Footer: React.FC = () => {
     return (
         <>
             <div className="footer">
-                <Button type="secondary" onClick={handleCopy}>📋 复制到剪贴板</Button>
+                <Button type="secondary" onClick={handleCopy}>📋 复制到公众号</Button>
                 <div className="footer-actions">
                     <Button theme="solid" type="primary" onClick={handlePublishClick}>☁️ 发布到草稿箱</Button>
                     <Button type="tertiary" onClick={handleBatchClick}>📦 批量发布</Button>
@@ -249,17 +393,88 @@ const Footer: React.FC = () => {
                         Toast.error('正文不能为空');
                         return;
                     }
-                    const title = getTitle().trim();
+                    const accountResult = resolvePublishAccount(currentRecord);
+                    if (!accountResult.ok) {
+                        Toast.error(accountResult.error);
+                        return;
+                    }
                     try {
                         setIsPublishing(true);
-                        const html = buildWeChatHtml(markdownContent, themeId);
+                        const { html, missingImageIds } = await buildWeChatHtmlForPublish(markdownContent, themeId);
+
+                        // 从当前记录中获取所有字段
+                        let title = '';
+                        let author: string | undefined;
+                        let digest: string | undefined;
+                        let contentSourceUrl: string | undefined;
+                        let coverImage: string | undefined;
+
+                        if (currentRecord) {
+                            const fields = currentRecord.fields;
+                            // 获取标题：优先从 titleFieldId 获取
+                            if (fieldMapping.titleFieldId && fields[fieldMapping.titleFieldId]) {
+                                title = toText(fields[fieldMapping.titleFieldId]);
+                            }
+                            // 获取作者
+                            if (fieldMapping.authorFieldId && fields[fieldMapping.authorFieldId]) {
+                                author = toText(fields[fieldMapping.authorFieldId]) || undefined;
+                            }
+                            // 获取摘要
+                            if (fieldMapping.digestFieldId && fields[fieldMapping.digestFieldId]) {
+                                digest = toText(fields[fieldMapping.digestFieldId]) || undefined;
+                            }
+                            // 获取原文链接
+                            if (fieldMapping.sourceUrlFieldId && fields[fieldMapping.sourceUrlFieldId]) {
+                                contentSourceUrl = toText(fields[fieldMapping.sourceUrlFieldId]) || undefined;
+                            }
+                            // 获取封面图片
+                            if (fieldMapping.coverFieldId && baseInfo.tableId && isBitableAvailable()) {
+                                try {
+                                    const attachments = await getAttachmentUrls(baseInfo.tableId, fieldMapping.coverFieldId, currentRecord.recordId);
+                                    if (attachments.length > 0) {
+                                        coverImage = await fetchImageAsBase64(attachments[0].url);
+                                    }
+                                } catch (e) {
+                                    console.warn('获取封面图片失败:', e);
+                                }
+                            }
+                        }
+
+                        // 回退：如果没有从字段获取到标题，从 markdown 提取
+                        if (!title) {
+                            title = getTitle();
+                        }
+                        title = title.trim();
+                        if (title.length > 64) {
+                            title = title.slice(0, 64);
+                        }
+
+                        logPublishDebug('single-prepared', {
+                            titleLength: title.length,
+                            markdownLength: markdownContent.length,
+                            htmlLength: html.length,
+                            imageCount: countImagesInHtml(html),
+                            missingImageCount: missingImageIds.length,
+                            hasAuthor: Boolean(author),
+                            hasDigest: Boolean(digest),
+                            hasSourceUrl: Boolean(contentSourceUrl),
+                            hasCoverImage: Boolean(coverImage)
+                        });
+                        if (missingImageIds.length > 0) {
+                            Toast.error(`有 ${missingImageIds.length} 张图片找不到（图片只保存在本机），请重新插入图片后再发布`);
+                            return;
+                        }
                         const result = await publishArticle({
-                            appId: apiConfig.appId,
-                            appSecret: apiConfig.appSecret,
+                            appId: accountResult.account.appId,
+                            appSecret: accountResult.account.appSecret,
                             publishMode: mode,
                             article: {
                                 title,
                                 content: html,
+                                author,
+                                digest,
+                                contentSourceUrl,
+                                coverImage
                             }
                         });
                         const publishId = result.mode === 'publish' ? result.publishId : result.draftMediaId;
@@ -277,6 +492,10 @@ const Footer: React.FC = () => {
                         }
                     } catch (error) {
                         const message = error instanceof Error ? error.message : '发布失败';
+                        logPublishDebug('single-error', {
+                            message,
+                            details: (error as { details?: unknown }).details
+                        });
                         Toast.error(message);
                     } finally {
                         setIsPublishing(false);
@@ -298,6 +517,11 @@ const Footer: React.FC = () => {
                 }}
                 onConfirm={runBatchPublish}
                 onClose={() => setIsBatchModalOpen(false)}
+            />
+            <ManualCopyModal
+                visible={isManualCopyModalOpen}
+                html={manualCopyHtml}
+                onClose={() => setIsManualCopyModalOpen(false)}
             />
         </>
     );

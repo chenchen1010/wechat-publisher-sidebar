@@ -1,4 +1,5 @@
-import { STYLES, ThemeId } from '../styles/huashengThemes';
+import { STYLES } from '../styles/huashengThemes';
+import type { ThemeId } from '../styles/huashengThemes';
 
 type ImageStoreLike = {
     getImageBlob: (imageId: string) => Promise<Blob | null>;
@@ -294,7 +295,54 @@ const wrapSectionIfNeeded = (doc: Document, themeId: string) => {
     doc.body.appendChild(section);
 };
 
-export const copyHtmlToClipboard = async (html: string, themeId: string) => {
+const copyWithExecCommand = (html: string): boolean => {
+    const container = document.createElement('div');
+    container.innerHTML = html;
+    container.style.position = 'fixed';
+    container.style.left = '-9999px';
+    container.style.top = '0';
+    container.style.opacity = '0';
+    container.style.pointerEvents = 'none';
+    container.setAttribute('contenteditable', 'true');
+    document.body.appendChild(container);
+
+    const range = document.createRange();
+    range.selectNodeContents(container);
+    const selection = window.getSelection();
+    if (selection) {
+        selection.removeAllRanges();
+        selection.addRange(range);
+    }
+
+    let success = false;
+    try {
+        success = document.execCommand('copy');
+    } catch {
+        success = false;
+    }
+
+    if (selection) {
+        selection.removeAllRanges();
+    }
+    document.body.removeChild(container);
+
+    return success;
+};
+
+const copyWithClipboardAPI = async (html: string, plainText: string) => {
+    const htmlBlob = new Blob([html], { type: 'text/html' });
+    const textBlob = new Blob([plainText], { type: 'text/plain' });
+
+    const clipboardItem = new ClipboardItem({
+        'text/html': htmlBlob,
+        'text/plain': textBlob
+    });
+
+    await navigator.clipboard.write([clipboardItem]);
+};
+
+// 导出处理后的 HTML 供手动复制弹窗使用
+export const prepareHtmlForCopy = async (html: string, themeId: string) => {
     const parser = new DOMParser();
     const doc = parser.parseFromString(html, 'text/html');
 
@@ -322,18 +370,45 @@ export const copyHtmlToClipboard = async (html: string, themeId: string) => {
     flattenListItems(doc);
     adjustBlockquotes(doc);
 
-    const simplifiedHTML = doc.body.innerHTML;
-    const plainText = doc.body.textContent || '';
+    return {
+        html: doc.body.innerHTML,
+        plainText: doc.body.textContent || '',
+        imageTotal: images.length,
+        successCount,
+        failCount
+    };
+};
 
-    const htmlBlob = new Blob([simplifiedHTML], { type: 'text/html' });
-    const textBlob = new Blob([plainText], { type: 'text/plain' });
+export const copyHtmlToClipboard = async (html: string, themeId: string) => {
+    const prepared = await prepareHtmlForCopy(html, themeId);
+    const { html: simplifiedHTML, plainText, imageTotal, successCount, failCount } = prepared;
 
-    const clipboardItem = new ClipboardItem({
-        'text/html': htmlBlob,
-        'text/plain': textBlob
-    });
+    let copied = false;
+    let needManualCopy = false;
 
-    await navigator.clipboard.write([clipboardItem]);
+    // 方法1: 尝试 Clipboard API（支持富文本）
+    if (typeof ClipboardItem !== 'undefined' && typeof navigator.clipboard?.write === 'function') {
+        try {
+            await copyWithClipboardAPI(simplifiedHTML, plainText);
+            copied = true;
+        } catch (error) {
+            console.warn('Clipboard API 失败:', error);
+        }
+    }
 
-    return { imageTotal: images.length, successCount, failCount };
+    // 方法2: 尝试 execCommand（部分浏览器支持富文本复制）
+    if (!copied) {
+        try {
+            copied = copyWithExecCommand(simplifiedHTML);
+        } catch (error) {
+            console.warn('execCommand 失败:', error);
+        }
+    }
+
+    // 方法3: 都失败了，返回 HTML 让用户手动复制
+    if (!copied) {
+        needManualCopy = true;
+    }
+
+    return { imageTotal, successCount, failCount, copied, needManualCopy, html: simplifiedHTML };
 };

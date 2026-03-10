@@ -13,6 +13,15 @@ export interface FieldMeta {
     type: number;
 }
 
+// 公众号账号信息
+export interface WechatAccount {
+    recordId: string;
+    name: string;
+    appId: string;
+    appSecret: string;
+    accountType?: string;
+}
+
 interface AppState {
     // --- Data Source ---
     baseInfo: {
@@ -32,10 +41,19 @@ interface AppState {
 
     // --- Configuration ---
     fieldMapping: {
-        contentFieldId: string;
-        statusFieldId: string;
-        publishIdFieldId: string;
-        publishTimeFieldId: string;
+        // 输入字段
+        titleFieldId: string;       // 标题
+        contentFieldId: string;     // 正文（markdown格式）
+        coverFieldId: string;       // 封面
+        authorFieldId: string;      // 作者
+        digestFieldId: string;      // 摘要
+        sourceUrlFieldId: string;   // 原文链接
+        accountFieldId: string;     // 发布账号
+        // 输出字段
+        statusFieldId: string;      // 发布状态
+        syncTimeFieldId: string;    // 同步时间
+        draftIdFieldId: string;     // 草稿ID
+        errorFieldId: string;       // 错误信息
     };
 
     // --- Styling ---
@@ -56,6 +74,10 @@ interface AppState {
         accountName: string;
         hasConfigured: boolean;
     };
+
+    // --- 账号列表 ---
+    accountList: WechatAccount[];
+    selectedAccountId: string | null;  // 选中的账号 recordId
 
     ui: {
         isApiModalOpen: boolean;
@@ -83,6 +105,8 @@ interface AppState {
     setApiModalOpen: (open: boolean) => void;
     updateRecord: (record: Record) => void;
     updateRecordFields: (recordId: string, fields: Record['fields']) => void;
+    setAccountList: (accounts: WechatAccount[]) => void;
+    selectAccount: (accountId: string | null) => void;
 }
 
 const API_STORAGE_KEY = 'wechat-publisher-api-config';
@@ -164,6 +188,48 @@ const persistShortcutKey = (key: string) => {
     window.localStorage.setItem(SHORTCUT_STORAGE_KEY, key);
 };
 
+const FIELD_MAPPING_STORAGE_PREFIX = 'wechat-publisher-field-mapping-';
+
+type FieldMappingConfig = {
+    titleFieldId: string;
+    contentFieldId: string;
+    coverFieldId: string;
+    authorFieldId: string;
+    digestFieldId: string;
+    sourceUrlFieldId: string;
+    accountFieldId: string;
+    statusFieldId: string;
+    syncTimeFieldId: string;
+    draftIdFieldId: string;
+    errorFieldId: string;
+};
+
+const loadFieldMapping = (tableId: string): FieldMappingConfig | null => {
+    if (!tableId || typeof window === 'undefined' || !window.localStorage) {
+        return null;
+    }
+    try {
+        const saved = window.localStorage.getItem(FIELD_MAPPING_STORAGE_PREFIX + tableId);
+        if (saved) {
+            return JSON.parse(saved);
+        }
+    } catch {
+        // ignore
+    }
+    return null;
+};
+
+const persistFieldMapping = (tableId: string, mapping: FieldMappingConfig) => {
+    if (!tableId || typeof window === 'undefined' || !window.localStorage) {
+        return;
+    }
+    try {
+        window.localStorage.setItem(FIELD_MAPPING_STORAGE_PREFIX + tableId, JSON.stringify(mapping));
+    } catch {
+        // ignore
+    }
+};
+
 const extractText = (value: any) => {
     if (value === null || value === undefined) {
         return '';
@@ -213,10 +279,17 @@ export const useAppStore = create<AppState>((set, get) => ({
     isLoading: false,
 
     fieldMapping: {
+        titleFieldId: '',
         contentFieldId: '',
+        coverFieldId: '',
+        authorFieldId: '',
+        digestFieldId: '',
+        sourceUrlFieldId: '',
+        accountFieldId: '',
         statusFieldId: '',
-        publishIdFieldId: '',
-        publishTimeFieldId: '',
+        syncTimeFieldId: '',
+        draftIdFieldId: '',
+        errorFieldId: '',
     },
 
     themeId: 'wechat-default',
@@ -231,11 +304,33 @@ export const useAppStore = create<AppState>((set, get) => ({
         ...loadApiConfig(),
     },
 
+    accountList: [],
+    selectedAccountId: null,
+
     ui: {
         isApiModalOpen: false,
     },
 
-    setBaseInfo: (info) => set((state) => ({ baseInfo: { ...state.baseInfo, ...info } })),
+    setBaseInfo: (info) => set((state) => {
+        const newBaseInfo = { ...state.baseInfo, ...info };
+        // 如果表格 ID 变化，尝试加载保存的字段映射
+        if (info.tableId && info.tableId !== state.baseInfo.tableId) {
+            const savedMapping = loadFieldMapping(info.tableId);
+            if (savedMapping) {
+                const normalizedMapping = {
+                    ...savedMapping,
+                    accountFieldId: savedMapping.accountFieldId || ''
+                };
+                const content = extractText(state.currentRecord?.fields[normalizedMapping.contentFieldId]);
+                return {
+                    baseInfo: newBaseInfo,
+                    fieldMapping: normalizedMapping,
+                    markdownContent: content
+                };
+            }
+        }
+        return { baseInfo: newBaseInfo };
+    }),
     setFields: (fields) => set({ fields }),
     setRecords: (records) => {
         const { fieldMapping, currentRecord } = get();
@@ -308,6 +403,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     setFieldMapping: (mapping) => set((state) => {
         const newMapping = { ...state.fieldMapping, ...mapping };
         const content = extractText(state.currentRecord?.fields[newMapping.contentFieldId]);
+        // 保存到 localStorage
+        if (state.baseInfo.tableId) {
+            persistFieldMapping(state.baseInfo.tableId, newMapping);
+        }
         return { fieldMapping: newMapping, markdownContent: content };
     }),
     setTheme: (themeId) => set({ themeId }),
@@ -381,5 +480,25 @@ export const useAppStore = create<AppState>((set, get) => ({
                 ? extractText(updatedRecord.fields[state.fieldMapping.contentFieldId])
                 : state.markdownContent
         };
+    }),
+    setAccountList: (accounts) => set({ accountList: accounts }),
+    selectAccount: (accountId) => set((state) => {
+        if (!accountId) {
+            return { selectedAccountId: null };
+        }
+        const account = state.accountList.find(a => a.recordId === accountId);
+        if (account) {
+            // 同时更新 apiConfig
+            return {
+                selectedAccountId: accountId,
+                apiConfig: {
+                    appId: account.appId,
+                    appSecret: account.appSecret,
+                    accountName: account.name,
+                    hasConfigured: true
+                }
+            };
+        }
+        return { selectedAccountId: accountId };
     }),
 }));

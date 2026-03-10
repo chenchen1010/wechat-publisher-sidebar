@@ -1,9 +1,8 @@
 import React, { useMemo } from 'react';
-import { Select, Button, Typography, Tag } from '@douyinfe/semi-ui';
-import { IconSetting } from '@douyinfe/semi-icons';
+import { Select, Typography, Tag, Tooltip } from '@douyinfe/semi-ui';
+import { IconInfoCircle } from '@douyinfe/semi-icons';
 import { FieldType } from '@lark-base-open/js-sdk';
 import { useAppStore } from '../store/useAppStore';
-import ApiSettingsModal from './ApiSettingsModal';
 import { STYLES } from '../styles/huashengThemes';
 
 const ConfigPanel: React.FC = () => {
@@ -12,11 +11,9 @@ const ConfigPanel: React.FC = () => {
         setFieldMapping,
         themeId,
         setTheme,
-        apiConfig,
         baseInfo,
         fields,
-        ui,
-        setApiModalOpen
+        accountList
     } = useAppStore();
 
     const themes = Object.entries(STYLES).map(([id, value]) => ({
@@ -40,7 +37,23 @@ const ConfigPanel: React.FC = () => {
 
     const textOptions = useMemo(() => buildOptions([FieldType.Text]), [fields]);
 
+    const accountFieldOptions = useMemo(
+        () => buildOptions([FieldType.Text, FieldType.SingleSelect]),
+        [fields]
+    );
+
     const isReady = baseInfo.isReady;
+    const hasAccounts = accountList.length > 0;
+
+    const helpContent = (
+        <div style={{ maxWidth: 240, lineHeight: 1.6, fontSize: 12 }}>
+            <div>• 标题取正文第一行</div>
+            <div>• 封面取正文第一张图</div>
+            <div>• 发布账号取“发布账号”字段</div>
+            <div style={{ marginTop: 6 }}>以下字段如存在会自动写回：</div>
+            <div>• 发布状态、发布时间、草稿ID</div>
+        </div>
+    );
 
     return (
         <div className="config-panel">
@@ -49,44 +62,42 @@ const ConfigPanel: React.FC = () => {
                 <div className="card-header">
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <Typography.Text>字段映射</Typography.Text>
-                        <Tag
-                            size="small"
-                            color={apiConfig.hasConfigured ? 'green' : 'grey'}
-                        >
-                            {apiConfig.hasConfigured ? 'API 已配置' : 'API 未配置'}
+                        <Tooltip content={helpContent} position="bottomLeft">
+                            <IconInfoCircle style={{ color: 'var(--semi-color-text-2)', cursor: 'help' }} />
+                        </Tooltip>
+                        <Tag size="small" color={hasAccounts ? 'green' : 'grey'}>
+                            {hasAccounts ? '账号表已加载' : '未找到账号表'}
                         </Tag>
                         <Tag size="small" color={isReady ? 'blue' : 'grey'}>
                             {baseInfo.isMock ? '本地演示' : (isReady ? '已连接表格' : '未连接表格')}
                         </Tag>
                     </div>
-                    <Button
-                        icon={<IconSetting />}
-                        theme="borderless"
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <Typography.Text type="tertiary">Markdown 正文</Typography.Text>
+                    <Select
                         size="small"
-                        type="tertiary"
-                        onClick={() => setApiModalOpen(true)}
+                        style={{ width: 160 }}
+                        optionList={textOptions}
+                        value={fieldMapping.contentFieldId}
+                        onChange={handleMappingChange('contentFieldId')}
+                        placeholder="选择正文字段"
+                        disabled={!isReady}
+                        showClear
                     />
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <Typography.Text type="tertiary">Markdown 正文</Typography.Text>
-                        <Select
-                            size="small"
-                            style={{ width: 160 }}
-                            optionList={textOptions}
-                            value={fieldMapping.contentFieldId}
-                            onChange={handleMappingChange('contentFieldId')}
-                            placeholder="选择正文字段"
-                            disabled={!isReady}
-                            showClear
-                        />
-                    </div>
-                    <Typography.Text type="tertiary">
-                        标题将自动取正文第一行，封面取正文第一张图
-                    </Typography.Text>
-                    <Typography.Text type="tertiary">
-                        发布状态、发布时间、草稿/发布ID 会自动写回到同名字段（如果存在）
-                    </Typography.Text>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }}>
+                    <Typography.Text type="tertiary">发布账号</Typography.Text>
+                    <Select
+                        size="small"
+                        style={{ width: 160 }}
+                        optionList={accountFieldOptions}
+                        value={fieldMapping.accountFieldId}
+                        onChange={handleMappingChange('accountFieldId')}
+                        placeholder="选择发布账号字段"
+                        disabled={!isReady}
+                        showClear
+                    />
                 </div>
             </div>
 
@@ -108,10 +119,8 @@ const ConfigPanel: React.FC = () => {
                         </Tag>
                     ))}
                 </div>
-
             </div>
 
-            <ApiSettingsModal visible={ui.isApiModalOpen} onCancel={() => setApiModalOpen(false)} />
         </div>
     );
 };

@@ -133,3 +133,74 @@ export const saveFieldMapping = async (tableId: string, mapping: Record<string, 
         // ignore
     }
 };
+
+// 附件类型定义
+export interface AttachmentInfo {
+    name: string;
+    url: string;
+    size: number;
+    type: string;
+    token?: string;
+}
+
+// 从附件字段获取附件信息
+export const getAttachmentUrls = async (tableId: string, fieldId: string, recordId: string): Promise<AttachmentInfo[]> => {
+    if (!fieldId) {
+        return [];
+    }
+    const table = await bitable.base.getTableById(tableId);
+    const attachmentField = await table.getFieldById(fieldId);
+
+    // 获取附件 URL
+    const urls = await (attachmentField as any).getAttachmentUrls(recordId);
+    if (!urls || !Array.isArray(urls)) {
+        return [];
+    }
+
+    // 获取单元格值以获取文件名等信息
+    const cellValue = await table.getCellValue(fieldId, recordId);
+    const attachments = Array.isArray(cellValue) ? cellValue : [];
+
+    return urls.map((url: string, index: number) => {
+        const attachment = (attachments[index] || {}) as { name?: string; size?: number; type?: string; token?: string };
+        return {
+            name: attachment.name || `attachment_${index}`,
+            url,
+            size: attachment.size || 0,
+            type: attachment.type || 'image/jpeg',
+            token: attachment.token
+        };
+    });
+};
+
+// 批量更新记录字段
+export interface UpdateRecordData {
+    recordId: string;
+    fields: Record<string, any>;
+}
+
+export const updateRecordFields = async (tableId: string, recordId: string, fields: Record<string, any>) => {
+    const table = await bitable.base.getTableById(tableId);
+    return table.setRecord(recordId, { fields });
+};
+
+// 批量更新多条记录
+export const batchUpdateRecords = async (tableId: string, updates: UpdateRecordData[]) => {
+    const table = await bitable.base.getTableById(tableId);
+    const records = updates.map(u => ({
+        recordId: u.recordId,
+        fields: u.fields
+    }));
+    return table.setRecords(records);
+};
+
+// 获取单选字段的选项
+export const getSingleSelectOptions = async (tableId: string, fieldId: string) => {
+    if (!fieldId) {
+        return [];
+    }
+    const table = await bitable.base.getTableById(tableId);
+    const field = await table.getFieldById(fieldId);
+    const meta = await field.getMeta();
+    return (meta as any).property?.options || [];
+};

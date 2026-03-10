@@ -6,19 +6,42 @@ import Workspace from './components/Workspace';
 import Footer from './components/Footer';
 import { FieldType } from '@lark-base-open/js-sdk';
 import { isBitableAvailable, getSelection, getTable, getView, getFieldMetaList, toFieldList, getVisibleRecordIdList, getAllRecords, loadFieldMapping, saveFieldMapping, onSelectionChange, onRecordModify } from './services/bitable';
+import { getAccountList } from './services/accountService';
+import imageStore from './utils/imageStore';
+
+// 初始化 ImageStore 并挂载到全局（供 clipboard.ts 使用）
+imageStore.init().then(() => {
+    console.log('ImageStore 初始化完成');
+    (globalThis as { imageStore?: typeof imageStore }).imageStore = imageStore;
+}).catch((error) => {
+    console.error('ImageStore 初始化失败:', error);
+});
+
+const MOCK_INLINE_IMAGE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO2+X2kAAAAASUVORK5CYII=';
 
 const createMockData = () => {
     const mockRecords = Array.from({ length: 20 }).map((_, i) => ({
         recordId: `rec_mock_${i}`,
         fields: {
-            fldContent: `# 文章 ${i + 1}\n\n这是文章内容...`
+            fldTitle: `文章标题 ${i + 1}`,
+            fldContent: `# 文章 ${i + 1}\n\n这是文章内容...\n\n![](${MOCK_INLINE_IMAGE})`,
+            fldAuthor: '测试作者',
+            fldDigest: '这是摘要',
+            fldPublishAccount: '测试账号',
         }
     }));
     const mockFields = [
-        { id: 'fldContent', name: 'Markdown内容', type: FieldType.Text },
+        { id: 'fldTitle', name: '标题', type: FieldType.Text },
+        { id: 'fldContent', name: '正文（markdown格式）', type: FieldType.Text },
+        { id: 'fldCover', name: '封面', type: FieldType.Attachment },
+        { id: 'fldAuthor', name: '作者', type: FieldType.Text },
+        { id: 'fldDigest', name: '摘要', type: FieldType.Text },
+        { id: 'fldSourceUrl', name: '原文链接', type: FieldType.Url },
+        { id: 'fldPublishAccount', name: '发布账号', type: FieldType.Text },
         { id: 'fldStatus', name: '发布状态', type: FieldType.SingleSelect },
-        { id: 'fldPublishId', name: '草稿/发布ID', type: FieldType.Text },
-        { id: 'fldPublishTime', name: '发布时间', type: FieldType.DateTime },
+        { id: 'fldSyncTime', name: '同步时间', type: FieldType.DateTime },
+        { id: 'fldDraftId', name: '草稿ID', type: FieldType.Text },
+        { id: 'fldError', name: '错误信息', type: FieldType.Text },
     ];
     return { mockRecords, mockFields };
 };
@@ -43,7 +66,8 @@ const App: React.FC = () => {
       setCurrentRecordById,
       updateRecord,
       fieldMapping,
-      baseInfo
+      baseInfo,
+      setAccountList
   } = useAppStore();
   const tableRef = useRef<Awaited<ReturnType<typeof getTable>> | null>(null);
   const offRecordModifyRef = useRef<(() => void) | null>(null);
@@ -57,10 +81,17 @@ const App: React.FC = () => {
         setFields(mockFields);
         setRecords(mockRecords);
         setFieldMapping({
+            titleFieldId: 'fldTitle',
             contentFieldId: 'fldContent',
+            coverFieldId: 'fldCover',
+            authorFieldId: 'fldAuthor',
+            digestFieldId: 'fldDigest',
+            sourceUrlFieldId: 'fldSourceUrl',
+            accountFieldId: 'fldPublishAccount',
             statusFieldId: 'fldStatus',
-            publishIdFieldId: 'fldPublishId',
-            publishTimeFieldId: 'fldPublishTime',
+            syncTimeFieldId: 'fldSyncTime',
+            draftIdFieldId: 'fldDraftId',
+            errorFieldId: 'fldError',
         });
     };
 
@@ -125,30 +156,61 @@ const App: React.FC = () => {
             if (storedMapping && typeof storedMapping === 'object') {
                 const nextMapping = storedMapping as Record<string, string>;
                 setFieldMapping({
+                    titleFieldId: nextMapping.titleFieldId || '',
                     contentFieldId: nextMapping.contentFieldId || '',
+                    coverFieldId: nextMapping.coverFieldId || '',
+                    authorFieldId: nextMapping.authorFieldId || '',
+                    digestFieldId: nextMapping.digestFieldId || '',
+                    sourceUrlFieldId: nextMapping.sourceUrlFieldId || '',
+                    accountFieldId: nextMapping.accountFieldId || '',
                     statusFieldId: nextMapping.statusFieldId || '',
-                    publishIdFieldId: nextMapping.publishIdFieldId || '',
-                    publishTimeFieldId: nextMapping.publishTimeFieldId || ''
+                    syncTimeFieldId: nextMapping.syncTimeFieldId || '',
+                    draftIdFieldId: nextMapping.draftIdFieldId || '',
+                    errorFieldId: nextMapping.errorFieldId || ''
                 });
             }
 
+            // 自动匹配字段
             const currentMapping = useAppStore.getState().fieldMapping;
             const nextMapping: Partial<typeof currentMapping> = {};
+
+            // 输入字段
+            if (!currentMapping.titleFieldId) {
+                nextMapping.titleFieldId = matchFieldIdByName(fieldList, ['标题', 'title', '文章标题']);
+            }
             if (!currentMapping.contentFieldId) {
-                const textField = fieldList.find((field) => field.type === FieldType.Text);
-                if (textField) {
-                    nextMapping.contentFieldId = textField.id;
-                }
+                nextMapping.contentFieldId = matchFieldIdByName(fieldList, ['正文（markdown格式）', '正文', '内容', 'content', 'markdown']);
             }
+            if (!currentMapping.coverFieldId) {
+                nextMapping.coverFieldId = matchFieldIdByName(fieldList, ['封面', 'cover', '封面图']);
+            }
+            if (!currentMapping.authorFieldId) {
+                nextMapping.authorFieldId = matchFieldIdByName(fieldList, ['作者', 'author']);
+            }
+            if (!currentMapping.digestFieldId) {
+                nextMapping.digestFieldId = matchFieldIdByName(fieldList, ['摘要', 'digest', '简介']);
+            }
+            if (!currentMapping.sourceUrlFieldId) {
+                nextMapping.sourceUrlFieldId = matchFieldIdByName(fieldList, ['原文链接', '原文', 'source', 'url']);
+            }
+            if (!currentMapping.accountFieldId) {
+                nextMapping.accountFieldId = matchFieldIdByName(fieldList, ['发布账号', '公众号账号', '账号', 'account']);
+            }
+
+            // 输出字段
             if (!currentMapping.statusFieldId) {
-                nextMapping.statusFieldId = matchFieldIdByName(fieldList, ['发布状态', '状态', '发布结果']);
+                nextMapping.statusFieldId = matchFieldIdByName(fieldList, ['发布状态', '状态']);
             }
-            if (!currentMapping.publishIdFieldId) {
-                nextMapping.publishIdFieldId = matchFieldIdByName(fieldList, ['草稿/发布ID', '草稿ID/发布ID', '草稿ID', '发布ID']);
+            if (!currentMapping.syncTimeFieldId) {
+                nextMapping.syncTimeFieldId = matchFieldIdByName(fieldList, ['同步时间', '发布时间']);
             }
-            if (!currentMapping.publishTimeFieldId) {
-                nextMapping.publishTimeFieldId = matchFieldIdByName(fieldList, ['发布时间', '发布日']);
+            if (!currentMapping.draftIdFieldId) {
+                nextMapping.draftIdFieldId = matchFieldIdByName(fieldList, ['草稿ID', 'draftId', 'media_id']);
             }
+            if (!currentMapping.errorFieldId) {
+                nextMapping.errorFieldId = matchFieldIdByName(fieldList, ['错误信息', '错误', 'error']);
+            }
+
             if (Object.keys(nextMapping).length > 0) {
                 setFieldMapping(nextMapping);
             }
@@ -164,6 +226,17 @@ const App: React.FC = () => {
         return undefined;
     }
 
+    // 加载账号列表
+    const loadAccounts = async () => {
+        try {
+            const accounts = await getAccountList();
+            setAccountList(accounts);
+        } catch (error) {
+            console.error('加载账号列表失败:', error);
+        }
+    };
+    loadAccounts();
+
     refreshData();
     offSelection = onSelectionChange(() => {
         refreshData();
@@ -177,7 +250,8 @@ const App: React.FC = () => {
             offRecordModifyRef.current();
         }
     };
-  }, [setRecords, setFields, setBaseInfo, setLoading, setFieldMapping, setCurrentRecordById, updateRecord]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [setRecords, setFields, setBaseInfo, setLoading, setFieldMapping, setCurrentRecordById, updateRecord, setAccountList]);
 
   useEffect(() => {
       const save = async () => {
