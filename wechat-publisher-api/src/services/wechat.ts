@@ -3,6 +3,8 @@ import FormData from 'form-data';
 import { getCachedToken, setCachedToken } from '../utils/token';
 
 const WECHAT_BASE_URL = 'https://api.weixin.qq.com/cgi-bin';
+const HTTP_TIMEOUT_MS = Number(process.env.HTTP_TIMEOUT_MS || 15000);
+const http = axios.create({ timeout: HTTP_TIMEOUT_MS });
 
 const ensureWechatSuccess = (data: any) => {
   if (typeof data?.errcode === 'number' && data.errcode !== 0) {
@@ -17,7 +19,7 @@ export const getAccessToken = async (appId: string, appSecret: string) => {
     return cached;
   }
 
-  const response = await axios.get(`${WECHAT_BASE_URL}/token`, {
+  const response = await http.get(`${WECHAT_BASE_URL}/token`, {
     params: {
       grant_type: 'client_credential',
       appid: appId,
@@ -39,7 +41,7 @@ export const getAccessToken = async (appId: string, appSecret: string) => {
 };
 
 export const getAccountBasicInfo = async (accessToken: string) => {
-  const response = await axios.get(`${WECHAT_BASE_URL}/account/getaccountbasicinfo`, {
+  const response = await http.get(`${WECHAT_BASE_URL}/account/getaccountbasicinfo`, {
     params: { access_token: accessToken }
   });
   ensureWechatSuccess(response.data);
@@ -59,7 +61,7 @@ export const uploadImage = async (accessToken: string, buffer: Buffer, filename:
   const contentType = mimeTypes[ext] || 'image/jpeg';
   form.append('media', buffer, { filename, contentType });
 
-  const response = await axios.post(
+  const response = await http.post(
     `${WECHAT_BASE_URL}/material/add_material`,
     form,
     {
@@ -108,7 +110,7 @@ export const createDraft = async (accessToken: string, article: DraftArticlePayl
     ]
   };
 
-  const response = await axios.post(`${WECHAT_BASE_URL}/draft/add`, payload, {
+  const response = await http.post(`${WECHAT_BASE_URL}/draft/add`, payload, {
     params: { access_token: accessToken }
   });
 
@@ -123,7 +125,7 @@ export const createDraft = async (accessToken: string, article: DraftArticlePayl
 };
 
 export const submitPublish = async (accessToken: string, mediaId: string) => {
-  const response = await axios.post(`${WECHAT_BASE_URL}/freepublish/submit`,
+  const response = await http.post(`${WECHAT_BASE_URL}/freepublish/submit`,
     { media_id: mediaId },
     { params: { access_token: accessToken } }
   );

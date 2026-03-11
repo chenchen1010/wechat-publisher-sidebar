@@ -1,0 +1,17 @@
+# Logs
+logs/
+*.log
+
+# SSH keys
+*.pem
+
+# macOS
+.DS_Store
+
+# Environment variables
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
