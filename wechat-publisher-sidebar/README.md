@@ -1,73 +1,52 @@
-# React + TypeScript + Vite
+# 微信公众号发布助手 - 飞书边栏插件
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+一个用于在飞书多维表格中编辑和发布微信公众号文章的边栏插件。
 
-Currently, two official plugins are available:
+## 功能特性
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- ✍️ Markdown 编辑和实时预览
+- 🎨 文章排版和样式调整
+- 📸 图片处理和压缩
+- 📤 一键发布到微信公众号
+- 📋 批量同步发布
+- 👥 多账号管理
 
-## React Compiler
+## 在飞书中使用
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+### 方式一：通过 GitHub Pages（推荐）
 
-## Expanding the ESLint configuration
+1. 在飞书多维表格中���点击「添加插件」→「自定义插件」
+2. 填入插件地址：`https://chenchen1010.github.io/wechat-publisher-sidebar/`
+3. 点击确认，插件会自动加载
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+### 方式二：本地开发
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+```bash
+# 安装依赖
+npm install
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+# 启动开发服务器
+npm run dev
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+# 构建生产版本
+npm run build
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## 配置要求
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+使用前需要配置：
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+1. **微信公众号**：AppID 和 AppSecret
+2. **后端 API**：需要部署配套的后端服务（wechat-publisher-api）
+
+## 技术栈
+
+- React 18
+- TypeScript
+- Vite
+- Semi Design
+- 飞书多维表格 JS SDK
+
+## License
+
+MIT
